@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#1769aa"><title>散水リモコン</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#182230;background:#f3f6fa}*{box-sizing:border-box}body{margin:0;padding:18px 14px 30px;max-width:520px;margin-inline:auto}header{text-align:center;padding:8px 0 18px}h1{font-size:1.7rem;margin:0 0 5px}.sub,.note{color:#657386;font-size:.88rem;line-height:1.55}.card{background:white;border:1px solid #e0e7ef;border-radius:18px;padding:17px;margin:12px 0;box-shadow:0 3px 12px #1b365b0b}.card h2{font-size:1.05rem;margin:0 0 13px}.row{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid #edf1f5}.row:last-child{border:0}.val{font-weight:700;text-align:right}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#e3a72f;margin-right:7px}.dot.ok{background:#179b61}.dot.bad{background:#cf3c3c}label{display:block;font-size:.9rem;font-weight:650;margin:12px 0 6px}input{width:100%;padding:13px 12px;border:1px solid #cbd5e1;border-radius:10px;font:inherit;background:white}button{border:0;border-radius:15px;font:inherit;font-weight:750;cursor:pointer;touch-action:manipulation}.connect{width:100%;padding:14px;background:#1769aa;color:white;margin-top:14px}.action{width:100%;min-height:76px;margin:8px 0;color:white;font-size:1.35rem}.on{background:#16834b}.off{background:#c73535}.action:disabled{opacity:.42;cursor:not-allowed}.small{background:#e9eef5;color:#25364b;padding:9px 12px;margin-top:8px}.warn{font-size:.85rem;color:#8b4b08;background:#fff5df;padding:11px;border-radius:10px;line-height:1.5}#log{font-size:.85rem;white-space:pre-wrap;overflow-wrap:anywhere;max-height:140px;overflow:auto;color:#4b5868}
+</style></head><body>
+<header><h1>💧 散水リモコン</h1><div class="sub">ESP32-C3 遠隔操作</div></header>
+<section class="card"><h2>クラウド接続</h2><div class="row"><span><i id="dot" class="dot"></i>接続状態</span><span id="connection" class="val">未接続</span></div>
+<label for="username">スマホ用ユーザー名</label><input id="username" autocomplete="username" value="sansui_phone">
+<label for="password">スマホ用パスワード</label><input id="password" type="password" autocomplete="current-password" placeholder="MQTTパスワードを入力">
+<button id="connectBtn" class="connect">クラウドに接続</button><p class="note">パスワードはこのページに保存しません。接続するたびに入力してください。</p></section>
+<section class="card"><h2>現在の状態</h2><div class="row"><span>リレー指令状態</span><span id="relay" class="val">不明</span></div><div class="row"><span>流水検知</span><span id="flow" class="val">不明</span></div><div class="row"><span>最終受信</span><span id="last" class="val">—</span></div><p class="note">状態表示にはESP32側から sansui/state へ状態を送信する機能が必要です。現在は受信表示の準備済みです。</p></section>
+<section class="card"><h2>散水操作</h2><button id="onBtn" class="action on" disabled>💧 散水 ON</button><button id="offBtn" class="action off" disabled>⏹ 停止 OFF</button><p id="feedback" class="note">クラウドに接続すると操作できます。</p><div class="warn">実際の電磁弁を接続する前に、リレー動作と自動停止を確認してください。通信が切れても現地で停止できる手段を用意してください。</div></section>
+<section class="card"><h2>通信ログ</h2><div id="log">まだ通信していません。</div><button id="clearLog" class="small">ログを消去</button></section>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script><script>
+(()=>{const HOST="uf438e12.ala.asia-southeast1.emqxsl.com",PORT=8084,PATH="/mqtt",$=id=>document.getElementById(id);let client=null;
+function log(t){const e=$("log"),s=new Date().toLocaleTimeString();e.textContent=`[${s}] ${t}\n`+(e.textContent==="まだ通信していません。"?"":e.textContent)}
+function conn(t,c){$("connection").textContent=t;$("dot").className="dot "+c}
+function buttons(v){$("onBtn").disabled=!v;$("offBtn").disabled=!v;$("connectBtn").textContent=v?"接続済み（切断）":"クラウドに接続"}
+function disconnect(){if(client){const old=client;client=null;old.end(true)}conn("未接続","");buttons(false)}
+$("connectBtn").addEventListener("click",()=>{if(client&&client.connected){disconnect();$("feedback").textContent="切断しました。";return}if(!window.mqtt){$("feedback").textContent="MQTTライブラリを読み込めません。インターネット接続を確認してください。";return}
+const username=$("username").value.trim(),password=$("password").value;if(!username||!password){$("feedback").textContent="ユーザー名とパスワードを入力してください。";return}
+conn("接続中…","");$("feedback").textContent="EMQX Cloudへ接続しています…";const clientId="sansui-web-"+Math.random().toString(16).slice(2,10);
+client=mqtt.connect(`wss://${HOST}:${PORT}${PATH}`,{username,password,clientId,clean:true,connectTimeout:10000,reconnectPeriod:0});
+client.on("connect",()=>{conn("接続中","ok");buttons(true);$("feedback").textContent="接続成功。ONまたはOFFを押せます。";log("EMQX Cloud 接続成功");client.subscribe("sansui/state",{qos:0},err=>log(err?"sansui/state 購読失敗":"sansui/state を購読しました"))});
+client.on("message",(topic,payload)=>{const msg=payload.toString();log(`受信 ${topic}: ${msg}`);$("last").textContent=new Date().toLocaleTimeString();if(topic==="sansui/state"){try{const s=JSON.parse(msg);if(typeof s.relay==="boolean")$("relay").textContent=s.relay?"ON":"OFF";if(typeof s.flow==="boolean")$("flow").textContent=s.flow?"流水を検知":"流水なし"}catch(_){}}});
+client.on("error",err=>{conn("接続エラー","bad");$("feedback").textContent="接続できません。認証情報・ネット接続・EMQX設定を確認してください。";log("エラー: "+err.message);buttons(false)});
+client.on("close",()=>{if(client){conn("切断","bad");buttons(false);log("接続が切れました")}})});
+function send(cmd){if(!client||!client.connected){$("feedback").textContent="先にクラウドへ接続してください。";return}const payload=JSON.stringify({cmd});client.publish("sansui/cmd",payload,{qos:0,retain:false},err=>{if(err){$("feedback").textContent="指令の送信に失敗しました。";log("送信失敗: "+err.message)}else{$("feedback").textContent=cmd==="on"?"ON指令を送信しました。":"OFF指令を送信しました。";log(`送信 sansui/cmd: ${payload}`)}})}
+$("onBtn").addEventListener("click",()=>send("on"));$("offBtn").addEventListener("click",()=>send("off"));$("clearLog").addEventListener("click",()=>$("log").textContent="ログを消去しました。");window.addEventListener("beforeunload",()=>{if(client)client.end(true)})})();
+</script></body></html>
